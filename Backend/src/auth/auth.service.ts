@@ -73,9 +73,7 @@ export class AuthService {
     // Constant-time comparison to prevent timing attacks
     const otpBuffer = Buffer.from(dto.otp_code.padEnd(6));
     const storedBuffer = Buffer.from(user.otp_code.padEnd(6));
-    
-    // [DEV ONLY] Allow universal '123456' OTP for easy testing
-    const isMatch = crypto.timingSafeEqual(otpBuffer, storedBuffer) || dto.otp_code === '123456';
+    const isMatch = crypto.timingSafeEqual(otpBuffer, storedBuffer);
 
     if (!isMatch) throw new UnauthorizedException('Invalid OTP code');
 
