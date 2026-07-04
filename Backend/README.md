@@ -1,70 +1,80 @@
-# FixIt Backend API Report & Summary
+# FixIt - Home Services Platform (Backend)
 
-## 🏗️ Architecture & Tech Stack
-The FixIt backend is a modular, enterprise-grade REST API designed to facilitate secure home service bookings, upfront payments, and strict role-based access control (RBAC).
+FixIt is a full-stack home services platform connecting consumers with professional technicians. This repository contains the robust, scalable REST API built with NestJS, powering authentication, booking coordination, service catalogs, and payment processing.
 
-- **Framework:** NestJS (Node.js/TypeScript)
-- **Database:** PostgreSQL (with TypeORM)
-- **Authentication:** Dual JWT (15m Access / 7d Refresh) + WhatsApp OTP Verification
-- **Payments:** Stripe API (Manual Capture flows + Webhooks)
-- **Integrations:** Meta WhatsApp Cloud API
-- **Testing:** TestSprite Autonomous AI testing agent
+## 🚀 Key Highlights
+
+- **JWT Role-Based Auth:** Secure authentication separating Consumer and Technician privileges.
+- **Robust Database Schema:** Managed via TypeORM and PostgreSQL, tracking complex relationships between users, services, and live bookings.
+- **Stripe Integration:** Server-side Stripe API interaction to securely issue Payment Intents and verify webhook transactions.
+- **Scalable Architecture:** Built on NestJS utilizing modular design, strict ValidationPipes, and a scalable data-access layer.
+
+## 💻 Tech Stack
+
+- **Framework:** NestJS
+- **Language:** TypeScript
+- **Database:** PostgreSQL
+- **ORM:** TypeORM
+- **Authentication:** JWT (JSON Web Tokens), Passport.js, bcrypt
+- **Payments:** Stripe Node.js SDK
+- **Environment:** Docker, Docker Compose
+- **Deployment:** Railway
+
+## 🛠️ How to Run the Project
+
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/abdulhadi-js/Fixit-Backend.git
+   cd Fixit-Backend
+   ```
+
+2. **Install dependencies**
+   ```bash
+   npm install
+   ```
+
+3. **Set up Environment Variables**
+   Create a `.env` file in the root directory:
+   ```env
+   PORT=3001
+   DATABASE_URL=postgresql://user:password@localhost:5432/fixit
+   JWT_SECRET=your_jwt_secret
+   STRIPE_SECRET_KEY=sk_test_...
+   STRIPE_WEBHOOK_SECRET=whsec_...
+   ```
+
+4. **Start the Database (Docker)**
+   If you have Docker installed, you can spin up the required PostgreSQL database using:
+   ```bash
+   docker-compose up -d
+   ```
+
+5. **Run Database Migrations / Sync**
+   By default, TypeORM is set to synchronize the database schema in development mode.
+
+6. **Seed the Database**
+   To populate the database with test users and service categories, run the provided python seed scripts:
+   ```bash
+   python seed_services.py
+   python create_test_users.py
+   ```
+
+7. **Run the Server**
+   ```bash
+   npm run start:dev
+   ```
+
+8. **Test the API**
+   The API will be running on `http://localhost:3001/api/v1`.
+
+## 📂 Project Structure Highlights
+
+- `src/auth/`: Login, Registration, JWT issuing, and role guards.
+- `src/users/`: User entity and management logic.
+- `src/services/`: Service catalog and categorization logic.
+- `src/bookings/`: Core booking logic, technician claiming, and agenda generation.
+- `src/payments/`: Stripe intent creation and webhook verification.
 
 ---
 
-## 🔒 Security & Data Integrity
-1. **Strict RBAC:** Endpoints are heavily protected utilizing `@UseGuards(JwtAuthGuard, RolesGuard)`. Actions are strictly partitioned across `CONSUMER`, `TECHNICIAN`, and `ADMIN` roles.
-2. **PostgreSQL GiST Constraint:** At the database level, the system utilizes a `tsrange` exclusion constraint. It is mathematically impossible for a technician to be double-booked for overlapping time slots.
-3. **Session Rotation:** Refresh tokens are securely hashed via bcrypt. Token reuse detection is enabled—if an old refresh token is used, all active sessions for that user are immediately invalidated.
-4. **Resilient URL Mapping:** An internal proxy middleware automatically catches and corrects requests missing the `/api/v1` prefix to gracefully handle misconfigured frontend/QA requests.
-
----
-
-## 🔌 Complete REST API Endpoints
-
-All endpoints are prefixed with `BASE_URL = /api/v1`
-
-### 1. Authentication (`/auth`)
-Handles secure onboarding, WhatsApp verification, and session management.
-
-| Method | Endpoint | Protection | Description |
-| :--- | :--- | :--- | :--- |
-| `POST` | `/auth/register` | Public | Creates a user account and triggers a 6-digit WhatsApp OTP. Returns 201 Created. |
-| `POST` | `/auth/verify-otp` | Public | Validates the OTP. If valid, marks `is_verified: true` and issues JWT token pair. |
-| `POST` | `/auth/login` | Public | Authenticates via phone/password. Rejects users if `is_verified` is false. |
-| `POST` | `/auth/resend-otp` | Public | Generates a new 6-digit OTP and fires a WhatsApp payload. |
-| `POST` | `/auth/refresh` | Public | Rotates the JWT session using a valid refresh token. |
-| `POST` | `/auth/logout` | `JWT` | Invalidates the active refresh token hash in the database. |
-| `GET` | `/auth/me` | `JWT` | Returns the profile data of the currently authenticated user. |
-
-### 2. Service Catalog (`/services`)
-Manages the upfront, fixed-price Pakistani home services catalog (pre-seeded with 25 realistic services).
-
-| Method | Endpoint | Protection | Description |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/services` | Public | Returns the full array of available home repair services and prices. |
-| `GET` | `/services/:id` | Public | Returns a specific service category by its UUID. |
-| `POST` | `/services` | `ADMIN` | Adds a new service category to the catalog. |
-| `PATCH`| `/services/:id` | `ADMIN` | Modifies an existing service's base price or duration. |
-| `DELETE`| `/services/:id`| `ADMIN` | Permanently deletes a service from the catalog. |
-
-### 3. Bookings (`/bookings`)
-The core transactional engine managing the lifecycle of a repair job.
-
-| Method | Endpoint | Protection | Description |
-| :--- | :--- | :--- | :--- |
-| `POST` | `/bookings` | `CONSUMER` | Initializes a booking. Automatically calls Stripe to generate a manual `PaymentIntent` authorization hold. Returns the booking object and Stripe `client_secret`. |
-| `GET` | `/bookings/availability` | `JWT` | Queries the DB for technicians that do *not* have an overlapping `tsrange` for a specific `service_id` and `scheduled_start`. |
-| `GET` | `/bookings/my` | `CONSUMER` | Returns all active and historical bookings for the logged-in Consumer. |
-| `GET` | `/bookings/agenda` | `TECHNICIAN` | Returns the upcoming scheduled jobs specifically assigned to the logged-in Technician. |
-| `PATCH`| `/bookings/:id/status` | `TECHNICIAN` | State machine transition. Moves booking from `CONFIRMED` -> `IN_PROGRESS` -> `COMPLETED`. **Critical:** Transitioning to `COMPLETED` automatically triggers the Stripe Capture API to finalize the funds. |
-| `DELETE`| `/bookings/:id` | `CONSUMER` | Cancels the booking and automatically issues a Stripe refund/cancellation of the payment hold. |
-
-### 4. Payments (`/payments`)
-Financial reporting and Webhook listeners.
-
-| Method | Endpoint | Protection | Description |
-| :--- | :--- | :--- | :--- |
-| `POST` | `/payments/webhook` | Public | Stripe Webhook Listener. Bypasses standard JSON parsers to use `rawBody` for cryptographic signature verification. Listens for async confirmation and cancellation events. |
-| `GET` | `/payments/transactions/my` | `CONSUMER` | Retrieves the ledger of authorization holds, captures, and refunds for the Consumer. |
-| `GET` | `/payments/earnings` | `TECHNICIAN` | Aggregates the Technician's total completed jobs and total cleared PKR earnings for the current week. |
+*Part of the FixIt ecosystem. Designed and built with ❤️*
