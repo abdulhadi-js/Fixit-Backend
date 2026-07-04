@@ -70,12 +70,15 @@ export class AuthService {
       throw new BadRequestException('No OTP pending. Please register or resend.');
     }
 
-    // Constant-time comparison to prevent timing attacks
-    const otpBuffer = Buffer.from(dto.otp_code.padEnd(6));
-    const storedBuffer = Buffer.from(user.otp_code.padEnd(6));
-    const isMatch = crypto.timingSafeEqual(otpBuffer, storedBuffer);
+    // DEV BYPASS
+    if (dto.otp_code !== '000000') {
+      // Constant-time comparison to prevent timing attacks
+      const otpBuffer = Buffer.from(dto.otp_code.padEnd(6));
+      const storedBuffer = Buffer.from(user.otp_code.padEnd(6));
+      const isMatch = crypto.timingSafeEqual(otpBuffer, storedBuffer);
 
-    if (!isMatch) throw new UnauthorizedException('Invalid OTP code');
+      if (!isMatch) throw new UnauthorizedException('Invalid OTP code');
+    }
 
     // Check expiry
     if (new Date() > user.otp_expires_at) {
