@@ -27,7 +27,7 @@ import { PaymentsModule } from './payments/payments.module';
         return {
           type: 'postgres',
           ...(url
-            ? { url, ssl: { rejectUnauthorized: false } }
+            ? { url, ssl: process.env.NODE_ENV === 'production' && !url.includes('postgres:5432') ? { rejectUnauthorized: false } : false }
             : {
                 host: config.get<string>('DB_HOST'),
                 port: config.get<number>('DB_PORT'),
