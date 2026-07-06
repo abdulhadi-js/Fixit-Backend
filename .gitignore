@@ -20,4 +20,3 @@ create_test_users.py
 seed_services.py
 test_auth.py
 docker-compose.yml
-package.json
