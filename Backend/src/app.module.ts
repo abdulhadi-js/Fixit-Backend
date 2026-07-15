@@ -9,6 +9,7 @@ import { WhatsappModule } from './whatsapp/whatsapp.module';
 import { ServicesModule } from './services/services.module';
 import { BookingsModule } from './bookings/bookings.module';
 import { PaymentsModule } from './payments/payments.module';
+import { HealthController } from './health.controller';
 
 @Module({
   imports: [
@@ -27,7 +28,11 @@ import { PaymentsModule } from './payments/payments.module';
         return {
           type: 'postgres',
           ...(url
-            ? { url, ssl: { rejectUnauthorized: false }, extra: { ssl: { rejectUnauthorized: false } } }
+            ? { 
+                url: url.replace('?sslmode=require', ''), 
+                ssl: { rejectUnauthorized: false }, 
+                extra: { ssl: { rejectUnauthorized: false } } 
+              }
             : {
                 host: config.get<string>('DB_HOST'),
                 port: config.get<number>('DB_PORT'),
@@ -37,7 +42,7 @@ import { PaymentsModule } from './payments/payments.module';
               }),
           entities: [__dirname + '/**/*.entity{.ts,.js}'],
           migrations: [__dirname + '/../migrations/*{.ts,.js}'],
-          synchronize: config.get<string>('NODE_ENV') !== 'production',
+          synchronize: true,  // Auto-create tables (safe for initial setup; replace with migrations later)
           logging: config.get<string>('NODE_ENV') !== 'production',
         };
       },
@@ -59,6 +64,7 @@ import { PaymentsModule } from './payments/payments.module';
     BookingsModule,
     PaymentsModule,
   ],
+  controllers: [HealthController],
   providers: [
     // Apply rate limiting globally
     {

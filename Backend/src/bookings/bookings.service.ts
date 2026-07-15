@@ -130,15 +130,17 @@ export class BookingsService {
     });
   }
 
-  /** Job board: Unassigned bookings */
+  /** Job board: All bookings with no technician assigned (open for claiming) */
   async getUnassignedJobs(): Promise<Booking[]> {
     return this.bookingRepo.find({
-      where: { 
-        technician_id: IsNull(),
-        status: Not(BookingStatus.PENDING_PAYMENT)
-      },
-      relations: { service: true },
-      order: { status: 'ASC' }, // Sort by status or scheduled time
+      where: [
+        // Cash bookings go straight to CONFIRMED with no technician
+        { technician_id: IsNull(), status: BookingStatus.CONFIRMED },
+        // Card bookings that have been paid but not yet claimed
+        { technician_id: IsNull(), status: BookingStatus.PENDING_PAYMENT },
+      ],
+      relations: { service: true, consumer: true },
+      order: { created_at: 'DESC' },
     });
   }
 
@@ -156,12 +158,16 @@ export class BookingsService {
     return this.bookingRepo.save(booking);
   }
 
-  /** Technician's jobs for today */
+  /** Technician's upcoming jobs — next 7 days so newly claimed jobs always appear */
   async getTechnicianAgenda(technicianId: string): Promise<any[]> {
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    const todayEnd = new Date();
-    todayEnd.setHours(23, 59, 59, 999);
+    const now = new Date();
+    // Start from beginning of today
+    const rangeStart = new Date(now);
+    rangeStart.setHours(0, 0, 0, 0);
+    // Show next 7 days
+    const rangeEnd = new Date(now);
+    rangeEnd.setDate(rangeEnd.getDate() + 7);
+    rangeEnd.setHours(23, 59, 59, 999);
 
     return this.dataSource.query(
       `SELECT b.*, sc.title as service_title, sc.base_price,
@@ -174,7 +180,7 @@ export class BookingsService {
          AND lower(b.scheduled_time) >= $2
          AND lower(b.scheduled_time) <= $3
        ORDER BY lower(b.scheduled_time) ASC`,
-      [technicianId, todayStart.toISOString(), todayEnd.toISOString()],
+      [technicianId, rangeStart.toISOString(), rangeEnd.toISOString()],
     );
   }
 
@@ -222,6 +228,28 @@ export class BookingsService {
   async cancelBooking(bookingId: string): Promise<void> {
     await this.bookingRepo.update(bookingId, { status: BookingStatus.CANCELLED });
     await this.paymentsService.refundPayment(bookingId);
+  }
+
+  /** Consumer marks a job as completed (Cash payments) */
+  async completeByConsumer(bookingId: string, consumerId: string): Promise<Booking> {
+    const booking = await this.bookingRepo.findOne({ where: { id: bookingId } });
+    if (!booking) throw new NotFoundException('Booking not found');
+    if (booking.consumer_id !== consumerId) {
+      throw new ForbiddenException('You can only update your own bookings');
+    }
+    
+    if (booking.status === BookingStatus.COMPLETED) {
+      throw new BadRequestException('Booking is already completed');
+    }
+
+    if (booking.payment_method !== 'CASH') {
+      throw new BadRequestException('Only CASH payment jobs can be manually marked complete by the consumer');
+    }
+
+    await this.bookingRepo.update(bookingId, { status: BookingStatus.COMPLETED });
+    
+    const updated = await this.bookingRepo.findOne({ where: { id: bookingId } });
+    return updated!;
   }
 
   async findById(id: string): Promise<Booking> {
