@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect, FormEvent, KeyboardEvent, ChangeEvent, Suspense } from 'react';
+import { useState, useRef, useEffect, FormEvent, KeyboardEvent, ChangeEvent, ClipboardEvent, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useAuth } from '../../../hooks/useAuth';
 import { resendOtp } from '../../../lib/api/auth.api';
@@ -45,6 +45,19 @@ function OtpVerificationForm() {
     if (e.key === 'Backspace' && !digits[index] && index > 0) {
       inputRefs.current[index - 1]?.focus();
     }
+  }
+
+  function handlePaste(e: ClipboardEvent<HTMLInputElement>) {
+    e.preventDefault();
+    const pastedData = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6);
+    if (!pastedData) return;
+    const newDigits = [...digits];
+    for (let i = 0; i < pastedData.length; i++) {
+      newDigits[i] = pastedData[i];
+    }
+    setDigits(newDigits);
+    const nextIndex = Math.min(pastedData.length, 5);
+    inputRefs.current[nextIndex]?.focus();
   }
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
@@ -129,11 +142,13 @@ function OtpVerificationForm() {
                   className="w-12 h-14 bg-surface-muted border border-border-soft text-center text-xl font-semibold text-text-primary focus:border-primary focus:ring-1 focus:ring-primary rounded-lg transition-all outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                   maxLength={1}
                   required
-                  type="number"
+                  type="text"
+                  pattern="\d*"
                   inputMode="numeric"
                   value={digit}
                   onChange={(e) => handleChange(index, e)}
                   onKeyDown={(e) => handleKeyDown(index, e)}
+                  onPaste={handlePaste}
                 />
               ))}
             </div>

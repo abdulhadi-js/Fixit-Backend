@@ -13,12 +13,17 @@ export default function RegisterPage() {
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [terms, setTerms] = useState(false);
   const [success, setSuccess] = useState('');
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (loading) return; // guard against double-submission
+    if (password !== confirmPassword) {
+      setError('Passwords do not match.');
+      return;
+    }
     if (!terms) {
       setError('Please agree to the Terms of Service and Privacy Policy.');
       return;
@@ -172,6 +177,18 @@ export default function RegisterPage() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              disabled={loading}
+            />
+            <Input
+              label="Confirm Password"
+              id="confirmPassword"
+              name="confirmPassword"
+              placeholder="••••••••"
+              required
+              type="password"
+              icon="lock"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
               disabled={loading}
             />
           </div>

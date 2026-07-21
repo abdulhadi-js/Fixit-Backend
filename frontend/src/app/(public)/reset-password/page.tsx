@@ -13,12 +13,17 @@ function ResetPasswordForm() {
 
   const [otpCode, setOtpCode] = useState('');
   const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (newPassword !== confirmPassword) {
+      setError('Passwords do not match.');
+      return;
+    }
     setLoading(true);
     setError('');
     setSuccessMsg('');
@@ -94,6 +99,17 @@ function ResetPasswordForm() {
             icon="lock"
             value={newPassword}
             onChange={(e) => setNewPassword(e.target.value)}
+          />
+          <Input
+            label="Confirm New Password"
+            id="confirmPassword"
+            name="confirmPassword"
+            placeholder="••••••••"
+            required
+            type="password"
+            icon="lock"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
           />
 
           <Button type="submit" loading={loading} fullWidth>
