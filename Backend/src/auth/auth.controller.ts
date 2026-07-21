@@ -1,7 +1,7 @@
 import { Controller, Post, Get, Body, HttpCode, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
-import { RegisterDto, LoginDto, VerifyOtpDto, ResendOtpDto, RefreshTokenDto } from './dto/auth.dto';
+import { RegisterDto, LoginDto, VerifyOtpDto, ResendOtpDto, RefreshTokenDto, ForgotPasswordDto, ResetPasswordDto } from './dto/auth.dto';
 import { JwtAuthGuard, JwtRefreshGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 
@@ -11,7 +11,7 @@ export class AuthController {
 
   /**
    * POST /api/v1/auth/register
-   * Rate-limited: 5 requests per minute to prevent phone number enumeration
+   * Rate-limited: 5 requests per minute
    */
   @Post('register')
   @Throttle({ default: { limit: 5, ttl: 60000 } })
@@ -42,9 +42,6 @@ export class AuthController {
 
   /**
    * POST /api/v1/auth/refresh
-   * Rotates the token pair. Client sends { refresh_token: "..." } in body.
-   * Returns a new { access_token, refresh_token, expires_in, token_type }.
-   * Old refresh token is immediately invalidated (rotation).
    */
   @Post('refresh')
   @HttpCode(200)
@@ -59,8 +56,6 @@ export class AuthController {
 
   /**
    * POST /api/v1/auth/logout
-   * Invalidates the server-side refresh token hash — all sessions on this device end.
-   * Requires a valid access token.
    */
   @Post('logout')
   @HttpCode(200)
@@ -71,18 +66,35 @@ export class AuthController {
 
   /**
    * POST /api/v1/auth/resend-otp
-   * Rate-limited: 5 requests per minute to prevent OTP flooding
    */
   @Post('resend-otp')
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   resendOtp(@Body() dto: ResendOtpDto) {
-    return this.authService.resendOtp(dto.phone_number);
+    return this.authService.resendOtp(dto.email);
+  }
+
+  /**
+   * POST /api/v1/auth/forgot-password
+   */
+  @Post('forgot-password')
+  @HttpCode(200)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  forgotPassword(@Body() dto: ForgotPasswordDto) {
+    return this.authService.forgotPassword(dto);
+  }
+
+  /**
+   * POST /api/v1/auth/reset-password
+   */
+  @Post('reset-password')
+  @HttpCode(200)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  resetPassword(@Body() dto: ResetPasswordDto) {
+    return this.authService.resetPassword(dto);
   }
 
   /**
    * GET /api/v1/auth/me
-   * Returns the currently authenticated user's profile decoded from the JWT.
-   * No DB hit — all data comes from the verified token payload.
    */
   @Get('me')
   @UseGuards(JwtAuthGuard)
@@ -90,7 +102,7 @@ export class AuthController {
     return {
       id: user.id,
       role: user.role,
-      phone_number: user.phone_number,
+      email: user.email,
     };
   }
 }

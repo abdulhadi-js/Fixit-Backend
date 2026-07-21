@@ -1,12 +1,16 @@
-import { IsString, IsPhoneNumber, IsEnum, MinLength, IsNumberString, Length } from 'class-validator';
+import { IsString, IsEmail, IsEnum, MinLength, IsNumberString, Length, IsOptional, IsPhoneNumber } from 'class-validator';
 import { UserRole } from '../../users/user.entity';
 
 export class RegisterDto {
   @IsString()
   full_name: string;
 
+  @IsEmail()
+  email: string;
+
+  @IsOptional()
   @IsPhoneNumber()
-  phone_number: string;
+  phone_number?: string;
 
   @IsEnum(UserRole)
   role: UserRole;
@@ -17,8 +21,8 @@ export class RegisterDto {
 }
 
 export class LoginDto {
-  @IsPhoneNumber()
-  phone_number: string;
+  @IsEmail()
+  email: string;
 
   @IsString()
   @MinLength(8)
@@ -26,8 +30,8 @@ export class LoginDto {
 }
 
 export class VerifyOtpDto {
-  @IsPhoneNumber()
-  phone_number: string;
+  @IsEmail()
+  email: string;
 
   @IsNumberString()
   @Length(6, 6)
@@ -35,11 +39,29 @@ export class VerifyOtpDto {
 }
 
 export class ResendOtpDto {
-  @IsPhoneNumber()
-  phone_number: string;
+  @IsEmail()
+  email: string;
 }
 
 export class RefreshTokenDto {
   @IsString()
   refresh_token: string;
+}
+
+export class ForgotPasswordDto {
+  @IsEmail()
+  email: string;
+}
+
+export class ResetPasswordDto {
+  @IsEmail()
+  email: string;
+
+  @IsNumberString()
+  @Length(6, 6)
+  otp_code: string;
+
+  @IsString()
+  @MinLength(8)
+  new_password: string;
 }

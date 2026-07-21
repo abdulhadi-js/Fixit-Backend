@@ -21,7 +21,10 @@ export class User {
   @Column({ type: 'text' })
   full_name: string;
 
-  @Column({ type: 'varchar', length: 15, unique: true })
+  @Column({ type: 'varchar', unique: true })
+  email: string;
+
+  @Column({ type: 'varchar', length: 15, nullable: true })
   phone_number: string;
 
   @Column({ type: 'enum', enum: UserRole })

@@ -6,12 +6,12 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy, JwtRefreshStrategy } from './strategies/jwt.strategy';
 import { UsersModule } from '../users/users.module';
-import { WhatsappModule } from '../whatsapp/whatsapp.module';
+import { MailModule } from '../mail/mail.module';
 
 @Module({
   imports: [
     UsersModule,
-    WhatsappModule,
+    MailModule,
     PassportModule.register({ defaultStrategy: 'jwt' }),
     // JwtModule is used for signAsync with explicit secrets per token type
     JwtModule.registerAsync({

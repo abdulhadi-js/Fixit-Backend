@@ -5,7 +5,7 @@ import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
-import { WhatsappModule } from './whatsapp/whatsapp.module';
+import { MailModule } from './mail/mail.module';
 import { ServicesModule } from './services/services.module';
 import { BookingsModule } from './bookings/bookings.module';
 import { PaymentsModule } from './payments/payments.module';
@@ -59,7 +59,7 @@ import { HealthController } from './health.controller';
     // ─── Feature Modules ─────────────────────────────────────────────────────
     AuthModule,
     UsersModule,
-    WhatsappModule,
+    MailModule,
     ServicesModule,
     BookingsModule,
     PaymentsModule,

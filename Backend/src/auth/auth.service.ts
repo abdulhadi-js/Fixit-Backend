@@ -11,15 +11,15 @@ import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import { UsersService } from '../users/users.service';
-import { WhatsappService } from '../whatsapp/whatsapp.service';
+import { MailService } from '../mail/mail.service';
 import { UserRole } from '../users/user.entity';
-import { RegisterDto, LoginDto, VerifyOtpDto } from './dto/auth.dto';
+import { RegisterDto, LoginDto, VerifyOtpDto, ForgotPasswordDto, ResetPasswordDto } from './dto/auth.dto';
 import { JwtPayload } from './strategies/jwt.strategy';
 
 export interface TokenPair {
   access_token: string;
   refresh_token: string;
-  expires_in: number;   // seconds until access token expires
+  expires_in: number;
   token_type: 'Bearer';
 }
 
@@ -31,15 +31,15 @@ export class AuthService {
   constructor(
     private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
-    private readonly whatsappService: WhatsappService,
+    private readonly mailService: MailService,
     private readonly config: ConfigService,
   ) {}
 
   // ─── Register ──────────────────────────────────────────────────────────────
   async register(dto: RegisterDto): Promise<{ message: string }> {
-    const existing = await this.usersService.findByPhone(dto.phone_number);
+    const existing = await this.usersService.findByEmail(dto.email);
     if (existing) {
-      throw new ConflictException('Phone number already registered');
+      throw new ConflictException('Email already registered');
     }
 
     const password_hash = await bcrypt.hash(dto.password, this.SALT_ROUNDS);
@@ -47,6 +47,7 @@ export class AuthService {
 
     await this.usersService.save({
       full_name: dto.full_name,
+      email: dto.email,
       phone_number: dto.phone_number,
       role: dto.role as UserRole,
       password_hash,
@@ -55,16 +56,15 @@ export class AuthService {
       otp_expires_at,
     });
 
-    // Fire OTP via WhatsApp — never send it in the API response
-    await this.whatsappService.sendOtp(dto.phone_number, otp_code);
+    await this.mailService.sendOtp(dto.email, otp_code);
 
-    return { message: 'OTP sent to your WhatsApp. Please verify your number.' };
+    return { message: 'OTP sent to your email. Please verify your account.' };
   }
 
   // ─── Verify OTP ────────────────────────────────────────────────────────────
   async verifyOtp(dto: VerifyOtpDto): Promise<TokenPair> {
-    const user = await this.usersService.findByPhone(dto.phone_number);
-    if (!user) throw new UnauthorizedException('Invalid phone number');
+    const user = await this.usersService.findByEmail(dto.email);
+    if (!user) throw new UnauthorizedException('Invalid email');
 
     if (!user.otp_code || !user.otp_expires_at) {
       throw new BadRequestException('No OTP pending. Please register or resend.');
@@ -72,7 +72,6 @@ export class AuthService {
 
     // DEV BYPASS
     if (dto.otp_code !== '000000') {
-      // Constant-time comparison to prevent timing attacks
       const otpBuffer = Buffer.from(dto.otp_code.padEnd(6));
       const storedBuffer = Buffer.from(user.otp_code.padEnd(6));
       const isMatch = crypto.timingSafeEqual(otpBuffer, storedBuffer);
@@ -80,15 +79,12 @@ export class AuthService {
       if (!isMatch) throw new UnauthorizedException('Invalid OTP code');
     }
 
-    // Check expiry
     if (new Date() > user.otp_expires_at) {
       throw new GoneException('OTP has expired. Please request a new one.');
     }
 
-    // Generate token pair
-    const tokens = await this.generateTokenPair(user.id, user.role, user.phone_number);
+    const tokens = await this.generateTokenPair(user.id, user.role, user.email);
 
-    // Verify user, clear OTP, store hashed refresh token
     await this.usersService.update(user.id, {
       is_verified: true,
       otp_code: null,
@@ -101,7 +97,7 @@ export class AuthService {
 
   // ─── Login ─────────────────────────────────────────────────────────────────
   async login(dto: LoginDto): Promise<TokenPair> {
-    const user = await this.usersService.findByPhone(dto.phone_number);
+    const user = await this.usersService.findByEmail(dto.email);
     if (!user) throw new UnauthorizedException('Invalid credentials');
 
     const passwordValid = await bcrypt.compare(dto.password, user.password_hash);
@@ -109,12 +105,11 @@ export class AuthService {
 
     if (!user.is_verified) {
       throw new ForbiddenException(
-        'Account not verified. Please verify your WhatsApp number first.',
+        'Account not verified. Please verify your email first.',
       );
     }
 
-    // Generate new token pair and rotate refresh token
-    const tokens = await this.generateTokenPair(user.id, user.role, user.phone_number);
+    const tokens = await this.generateTokenPair(user.id, user.role, user.email);
 
     await this.usersService.update(user.id, {
       refresh_token_hash: await bcrypt.hash(tokens.refresh_token, this.SALT_ROUNDS),
@@ -124,12 +119,7 @@ export class AuthService {
   }
 
   // ─── Refresh Token ─────────────────────────────────────────────────────────
-  /**
-   * Validates the refresh token against the stored hash, then issues a new
-   * token pair (rotation). The old refresh token is invalidated immediately.
-   */
   async refreshTokens(userId: string, rawRefreshToken: string): Promise<TokenPair> {
-    // Must explicitly fetch refresh_token_hash (it has select: false)
     const user = await this.usersService.findByIdWithRefreshToken(userId);
 
     if (!user || !user.refresh_token_hash) {
@@ -138,15 +128,13 @@ export class AuthService {
 
     const isValid = await bcrypt.compare(rawRefreshToken, user.refresh_token_hash);
     if (!isValid) {
-      // Possible token reuse attack — invalidate all sessions
       await this.usersService.update(userId, { refresh_token_hash: null });
       throw new UnauthorizedException(
         'Refresh token reuse detected. All sessions have been invalidated.',
       );
     }
 
-    // Rotate: issue new pair, hash + store new refresh token
-    const tokens = await this.generateTokenPair(user.id, user.role, user.phone_number);
+    const tokens = await this.generateTokenPair(user.id, user.role, user.email);
 
     await this.usersService.update(userId, {
       refresh_token_hash: await bcrypt.hash(tokens.refresh_token, this.SALT_ROUNDS),
@@ -162,9 +150,9 @@ export class AuthService {
   }
 
   // ─── Resend OTP ────────────────────────────────────────────────────────────
-  async resendOtp(phone_number: string): Promise<{ message: string }> {
-    const user = await this.usersService.findByPhone(phone_number);
-    if (!user) throw new UnauthorizedException('Phone number not found');
+  async resendOtp(email: string): Promise<{ message: string }> {
+    const user = await this.usersService.findByEmail(email);
+    if (!user) throw new UnauthorizedException('Email not found');
 
     if (user.is_verified) {
       throw new BadRequestException('Account already verified');
@@ -172,9 +160,58 @@ export class AuthService {
 
     const { otp_code, otp_expires_at } = this.generateOtp();
     await this.usersService.update(user.id, { otp_code, otp_expires_at });
-    await this.whatsappService.sendOtp(phone_number, otp_code);
+    await this.mailService.sendOtp(email, otp_code);
 
-    return { message: 'New OTP sent to your WhatsApp.' };
+    return { message: 'New OTP sent to your email.' };
+  }
+
+  // ─── Forgot Password ───────────────────────────────────────────────────────
+  async forgotPassword(dto: ForgotPasswordDto): Promise<{ message: string }> {
+    const user = await this.usersService.findByEmail(dto.email);
+    if (!user) {
+      // Return same message to prevent email enumeration
+      return { message: 'If this email exists, an OTP has been sent.' };
+    }
+
+    const { otp_code, otp_expires_at } = this.generateOtp();
+    await this.usersService.update(user.id, { otp_code, otp_expires_at });
+    await this.mailService.sendOtp(dto.email, otp_code);
+
+    return { message: 'If this email exists, an OTP has been sent.' };
+  }
+
+  // ─── Reset Password ────────────────────────────────────────────────────────
+  async resetPassword(dto: ResetPasswordDto): Promise<{ message: string }> {
+    const user = await this.usersService.findByEmail(dto.email);
+    if (!user) throw new UnauthorizedException('Invalid email');
+
+    if (!user.otp_code || !user.otp_expires_at) {
+      throw new BadRequestException('No OTP pending.');
+    }
+
+    // DEV BYPASS
+    if (dto.otp_code !== '000000') {
+      const otpBuffer = Buffer.from(dto.otp_code.padEnd(6));
+      const storedBuffer = Buffer.from(user.otp_code.padEnd(6));
+      const isMatch = crypto.timingSafeEqual(otpBuffer, storedBuffer);
+
+      if (!isMatch) throw new UnauthorizedException('Invalid OTP code');
+    }
+
+    if (new Date() > user.otp_expires_at) {
+      throw new GoneException('OTP has expired.');
+    }
+
+    const password_hash = await bcrypt.hash(dto.new_password, this.SALT_ROUNDS);
+
+    await this.usersService.update(user.id, {
+      password_hash,
+      otp_code: null,
+      otp_expires_at: null,
+      refresh_token_hash: null, // invalidate sessions
+    });
+
+    return { message: 'Password reset successfully. Please log in.' };
   }
 
   // ─── Helpers ───────────────────────────────────────────────────────────────
@@ -189,10 +226,10 @@ export class AuthService {
   private async generateTokenPair(
     userId: string,
     role: UserRole,
-    phone: string,
+    email: string,
   ): Promise<TokenPair> {
-    const accessPayload: JwtPayload = { sub: userId, role, phone, type: 'access' };
-    const refreshPayload: JwtPayload = { sub: userId, role, phone, type: 'refresh' };
+    const accessPayload: JwtPayload = { sub: userId, role, email, type: 'access' };
+    const refreshPayload: JwtPayload = { sub: userId, role, email, type: 'refresh' };
 
     const jwtSecret = this.config.get<string>('JWT_SECRET') as string;
     const jwtRefreshSecret = this.config.get<string>('JWT_REFRESH_SECRET') as string;

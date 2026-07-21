@@ -7,7 +7,7 @@ import { UserRole } from '../../users/user.entity';
 export interface JwtPayload {
   sub: string;       // user.id (UUID)
   role: UserRole;
-  phone: string;
+  email: string;
   type: 'access' | 'refresh';
 }
 
@@ -29,7 +29,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
     return {
       id: payload.sub,
       role: payload.role,
-      phone_number: payload.phone,
+      email: payload.email,
     };
   }
 }
@@ -51,6 +51,6 @@ export class JwtRefreshStrategy extends PassportStrategy(Strategy, 'jwt-refresh'
       throw new UnauthorizedException('Token type mismatch: expected refresh token');
     }
     // Return minimal payload — AuthService will validate the hash against DB
-    return { id: payload.sub, role: payload.role, phone_number: payload.phone };
+    return { id: payload.sub, role: payload.role, email: payload.email };
   }
 }
