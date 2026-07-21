@@ -1,105 +1,88 @@
 import { Injectable, Logger } from '@nestjs/common';
-import * as nodemailer from 'nodemailer';
 import { ConfigService } from '@nestjs/config';
+import { Resend } from 'resend';
 
 @Injectable()
 export class MailService {
-  private transporter;
   private readonly logger = new Logger(MailService.name);
+  private resend: Resend | null = null;
+  private readonly fromEmail: string;
 
   constructor(private config: ConfigService) {
-    const port = Number(this.config.get<number>('SMTP_PORT', 1025));
-    this.transporter = nodemailer.createTransport({
-      host: this.config.get<string>('SMTP_HOST', 'localhost'),
-      port: port,
-      secure: port === 465,
-      auth: {
-        user: this.config.get<string>('SMTP_USER', 'test'),
-        pass: this.config.get<string>('SMTP_PASS', 'test'),
-      },
-      // Force IPv4 to prevent 'ENETUNREACH' errors in IPv6-unsupported environments like Railway
-      family: 4,
-    } as any);
+    const apiKey = this.config.get<string>('RESEND_API_KEY');
+    this.fromEmail = this.config.get<string>('MAIL_FROM', 'onboarding@resend.dev');
+
+    if (apiKey && apiKey !== 'REPLACE_WITH_RESEND_API_KEY') {
+      this.resend = new Resend(apiKey);
+      this.logger.log('Resend mail service initialized ✅');
+    } else {
+      this.logger.warn('⚠️  RESEND_API_KEY not set — emails will be logged to console only (dev mode)');
+    }
   }
 
-  /**
-   * Sends an OTP verification email.
-   * Falls back to a prominent console log if SMTP is unavailable,
-   * so the OTP is always visible in Railway/local logs.
-   */
   async sendOtp(email: string, otpCode: string): Promise<void> {
-    try {
-      const info = await this.transporter.sendMail({
-        from: '"FixIt" <no-reply@fixit.com>',
-        to: email,
-        subject: 'Your FixIt OTP Code',
-        text: `Your OTP code is ${otpCode}. It expires in 5 minutes.`,
-        html: `
-          <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto; padding: 24px; border: 1px solid #e5e7eb; border-radius: 8px;">
-            <h2 style="color: #4f46e5;">Your FixIt OTP Code</h2>
-            <p>Use the following code to verify your account. It expires in <strong>5 minutes</strong>.</p>
-            <div style="font-size: 32px; font-weight: bold; letter-spacing: 8px; text-align: center; padding: 16px; background: #f3f4f6; border-radius: 8px; margin: 16px 0;">
-              ${otpCode}
-            </div>
-            <p style="color: #6b7280; font-size: 12px;">If you did not request this, please ignore this email.</p>
-          </div>
-        `,
-      });
-      this.logger.log(`OTP email sent to ${email}: ${info.messageId}`);
-    } catch (error) {
-      this.logger.error(`Failed to send OTP email to ${email}`, error);
-      // ⚠️ DEV FALLBACK — always log OTP prominently so it's visible in Railway/console logs
-      this.logger.warn(
-        `\n${'='.repeat(60)}\n` +
-        `⚠️  [DEV FALLBACK] SMTP failed — OTP NOT emailed\n` +
-        `   Recipient : ${email}\n` +
-        `   OTP Code  : ${otpCode}\n` +
-        `${'='.repeat(60)}`,
-      );
-    }
+    await this.send(email, 'Your FixIt OTP Code', this.buildOtpHtml(otpCode, 'Verify your account'));
   }
 
-  /**
-   * Alias for sendOtp — used specifically for forgot-password flows.
-   * Sends the same email but with a different subject line for clarity.
-   */
   async sendForgotPasswordOtp(email: string, otpCode: string): Promise<void> {
-    try {
-      const info = await this.transporter.sendMail({
-        from: '"FixIt" <no-reply@fixit.com>',
-        to: email,
-        subject: 'FixIt Password Reset OTP',
-        text: `Your password reset OTP is ${otpCode}. It expires in 5 minutes.`,
-        html: `
-          <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto; padding: 24px; border: 1px solid #e5e7eb; border-radius: 8px;">
-            <h2 style="color: #4f46e5;">FixIt Password Reset</h2>
-            <p>Use the following code to reset your password. It expires in <strong>5 minutes</strong>.</p>
-            <div style="font-size: 32px; font-weight: bold; letter-spacing: 8px; text-align: center; padding: 16px; background: #f3f4f6; border-radius: 8px; margin: 16px 0;">
-              ${otpCode}
-            </div>
-            <p style="color: #6b7280; font-size: 12px;">If you did not request a password reset, please ignore this email.</p>
-          </div>
-        `,
-      });
-      this.logger.log(`Password reset OTP sent to ${email}: ${info.messageId}`);
-    } catch (error) {
-      this.logger.error(`Failed to send password reset OTP to ${email}`, error);
-      // ⚠️ DEV FALLBACK
-      this.logger.warn(
-        `\n${'='.repeat(60)}\n` +
-        `⚠️  [DEV FALLBACK] SMTP failed — Password Reset OTP NOT emailed\n` +
-        `   Recipient : ${email}\n` +
-        `   OTP Code  : ${otpCode}\n` +
-        `${'='.repeat(60)}`,
-      );
-    }
+    await this.send(email, 'FixIt Password Reset Code', this.buildOtpHtml(otpCode, 'Reset your password'));
   }
 
-  /**
-   * Generic OTP email sender — an alias for sendOtp.
-   * Provided for flexibility when callers want a more explicit method name.
-   */
   async sendOtpEmail(email: string, otpCode: string): Promise<void> {
     return this.sendOtp(email, otpCode);
+  }
+
+  private async send(to: string, subject: string, html: string): Promise<void> {
+    if (!this.resend) {
+      this.logger.warn(
+        `\n${'='.repeat(60)}\n` +
+        `⚠️  [DEV FALLBACK] Resend not configured — Email NOT sent\n` +
+        `   Recipient : ${to}\n` +
+        `   Subject   : ${subject}\n` +
+        `${'='.repeat(60)}`,
+      );
+      return;
+    }
+
+    try {
+      const { data, error } = await this.resend.emails.send({
+        from: this.fromEmail,
+        to,
+        subject,
+        html,
+      });
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      this.logger.log(`✅ Email sent to ${to} (id: ${data?.id})`);
+    } catch (error: any) {
+      this.logger.error(`❌ Failed to send email to ${to}: ${error.message}`);
+      this.logger.warn(
+        `\n${'='.repeat(60)}\n` +
+        `⚠️  [FALLBACK] Email failed — check RESEND_API_KEY in Railway vars\n` +
+        `   Recipient : ${to}\n` +
+        `${'='.repeat(60)}`,
+      );
+    }
+  }
+
+  private buildOtpHtml(otpCode: string, action: string): string {
+    return `
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 480px; margin: 0 auto; background: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden;">
+        <div style="background: linear-gradient(135deg, #6366f1, #8b5cf6); padding: 32px 24px; text-align: center;">
+          <h1 style="color: white; margin: 0; font-size: 24px; font-weight: 700;">🔧 FixIt</h1>
+        </div>
+        <div style="padding: 32px 24px;">
+          <h2 style="color: #111827; margin: 0 0 8px;">${action}</h2>
+          <p style="color: #6b7280; margin: 0 0 24px;">Use the code below. It expires in <strong>5 minutes</strong>.</p>
+          <div style="font-size: 36px; font-weight: 800; letter-spacing: 10px; text-align: center; padding: 20px; background: #f9fafb; border-radius: 8px; color: #4f46e5; margin-bottom: 24px;">
+            ${otpCode}
+          </div>
+          <p style="color: #9ca3af; font-size: 12px; text-align: center; margin: 0;">If you didn't request this, you can safely ignore this email.</p>
+        </div>
+      </div>
+    `;
   }
 }
